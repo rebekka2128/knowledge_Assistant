@@ -25,7 +25,8 @@ jobs:
 
       - name: Create .env file
         run: |
-          echo "BASE_URL=${{ secrets.BASE_URL }}" >> .env
+          echo "WEB_BASE_URL=${{ secrets.BASE_URL }}" >> .env
+          echo "API_BASE_URL=${{ secrets.BASE_URL }}" >> .env
           echo "HEADLESS=true" >> .env
 
       - name: Run API tests
@@ -96,7 +97,7 @@ jobs:
           path: reports/allure-results
 
       - name: Generate Allure report
-        uses: simple-elf/allure-report-action@v1.9
+        uses: simple-elf/allure-report-action@v1.15
         if: always()
         with:
           allure_results: reports/allure-results
