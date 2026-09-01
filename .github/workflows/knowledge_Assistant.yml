@@ -1,173 +1,111 @@
-project:
-  name: Knowledge Assistant — Automated Test Suite
-  target_under_test: https://main-knowledge-assistant.newpage.workers.dev/
-  description: >
-    Automated regression suite for a document Q&A system that returns an answer,
-    citations, and visible source documents based on a user's question, region,
-    and role. Covers both the REST API (pytest + requests) and the UI
-    (pytest + Playwright), driven from a shared golden-question dataset.
+name: Knowledge Assistant CI
 
-structure:
-  config.py: Loads .env; base URLs, timeouts, headless flag
-  conftest.py: Shared fixtures - browser/page, API client, golden-question parametrization
-  pytest.ini: "Pytest config: writes Allure results to reports/allure-results, cleaned each run"
-  .env: Environment configuration (base URLs, headless flag, timeouts)
-  pages:
-    base_page.py: Opens the app in the browser
-    knowledge_Assistant.py: "Page object: region/role selectors, ask, answer, citations, docs panel"
-  utils:
-    api_client.py: Thin requests wrapper for POST /query; response-field extraction helpers
-    validators_api.py: Shared pass-criteria checks for API responses
-    validators_knowledgeAssistant.py: Shared pass-criteria checks for UI responses
-  tests:
-    api:
-      test_query_api.py: Golden-question-driven API tests + header presence/requirement checks
-      test_negative_api.py: Negative/adversarial API input tests
-    ui:
-      test_KnowledgeAssistantPage.py: Golden-question-driven UI tests + region/role selector checks
-  test_data:
-    golden_questions.json: Single source of truth dataset driving both API and UI suites
-  reports: Generated Allure results/report output (not source)
-  main.py: Unused IDE scaffold file (PyCharm sample script, not part of the suite)
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
-dependencies:
-  runner: pytest==9.1.1
-  api: requests==2.34.2
-  ui: playwright==1.62.0, pytest-playwright==0.9.0
-  parallel: pytest-xdist==3.8.0
-  reporting: allure-pytest==2.16.0
-  config: python-dotenv==1.2.3
+jobs:
+  api-tests:
+    name: API Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-golden_question_dataset:
-  file: test_data/golden_questions.json
-  total_entries: 62
-  fields:
-    id: Stable identifier (e.g. GQ-007), used as the pytest test ID
-    category: What it tests (see categories below)
-    test_type: Which layer(s) run it - ui, api, or both
-    question / region / role: The request to send
-    expected_behavior: answer or refusal
-    expected_status: Expected HTTP status (API layer)
-    expected_facts: Substrings required (answer) or forbidden (refusal)
-    expected_citations / forbidden_citations: Document IDs required / forbidden
-    expected_visible_documents: Document IDs expected in the scoped documents panel
-  breakdown_by_category:
-    global_access: 12
-    role_access: 10
-    boundary: 8
-    positive: 6
-    lifecycle: 4
-    region_access: 4
-    prompt_injection: 3
-    unsupported: 3
-    input_validation: 3
-    citation: 2
-    missing_context: 2
-    paraphrased_question: 2
-    hallucination: 2
-    multi_document: 1
-  breakdown_by_layer:
-    ui_only: 46
-    ui_and_api: 14
-    api_only: 2
-  breakdown_by_expected_behavior:
-    answer: 31
-    refusal: 31
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-api_test_suite:
-  test_query_api.py:
-    test_golden_question_api:
-      description: Runs every golden question with test_type including "api" against POST /query
-      driven_by: api_golden_question fixture (filters golden_questions.json)
-    test_query_requires_region_and_role_headers:
-      description: Confirms all 3 regions x 4 roles return 200 OK with a valid question
-      cases: 12
-    test_query_missing_context_header:
-      description: Confirms a missing region or role header doesn't cause a 5xx
-      cases: 2
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-  test_negative_api.py:
-    total_functions: 12
-    total_parametrized_cases: 56
-    covered:
-      - name: Unknown or invalid region value
-        cases: 4
-      - name: Invalid role value
-        cases: 5
-      - name: Empty region header
-        cases: 1
-      - name: Empty role header
-        cases: 1
-      - name: Whitespace or case-variant headers
-        cases: 8
-      - name: Missing or empty question (single context)
-        cases: 1
-      - name: Empty or whitespace-only question
-        cases: 5
-      - name: Invalid question type (int, bool, list, dict)
-        cases: 4
-      - name: Missing question across all valid region x role pairs
-        cases: 12
-      - name: Unsupported or off-topic question
-        cases: 7
-      - name: Malicious input (SQLi, prompt injection, unauthorized-access phrasing)
-        cases: 5
-      - name: Cross-region access attempt
-        cases: 3
-    not_covered:
-      - name: Body-level negative input
-        status: not yet implemented
-        includes:
-          - Invalid / malformed JSON payload
-          - Wrong HTTP method
-          - Wrong Content-Type header
-          - Oversized question payload
-      - name: Security smoke beyond SQL injection
-        status: partial
-        detail: Only one SQL-injection-style case exists; XSS payloads and injection aimed at trap docs (D-003, D-005, D-009) not yet added
-      - name: D-009 combined region+role gating
-        status: needs dedicated case
-        detail: Draft, EMEA-only, Manager-only vendor checklist has no isolated combined-restriction test
+      - name: Create .env file
+        run: |
+          echo "BASE_URL=${{ secrets.BASE_URL }}" >> .env
+          echo "HEADLESS=true" >> .env
 
-ui_test_suite:
-  test_KnowledgeAssistantPage.py:
-    test_select_region:
-      description: Confirms each of the 3 regions can be selected in the dropdown
-      cases: 3
-    test_select_role:
-      description: Confirms each of the 4 roles can be selected in the dropdown
-      cases: 4
-    test_golden_question_ui:
-      description: Runs every golden question with test_type including "ui" against the live UI
-      driven_by: ui_golden_question fixture (filters golden_questions.json)
+      - name: Run API tests
+        run: pytest tests/api -n auto --alluredir=reports/allure-results
 
-test_strategy_summary:
-  source: TestStrategy.md
-  scope:
-    - API automation (/query endpoint)
-    - UI automation (Playwright)
-    - Access control (region x role scoping)
-    - Document lifecycle enforcement (Draft, In Review, Approved, Retired)
-    - Citation correctness
-    - Input robustness
-    - Guardrail / prompt-injection resistance
-  out_of_scope:
-    - Performance / load testing
-    - Systematic penetration testing
-    - Accessibility (a11y)
-    - Mobile / responsive UI
-    - Long-term output-drift monitoring
-    - Free-form NLU/paraphrase robustness as a fixed target
-  known_gaps:
-    - Body-level negative input handling (malformed JSON, wrong method/content-type, oversized question)
-    - XSS and trap-doc-targeted injection payloads
-    - D-009 combined region+role gating dedicated case
-    - Cross-layer diff (same question, UI result vs API result compared directly)
-  risk_flagged_as_thin: Negative/malformed-input suite (Section 13, Risks & Limitations)
+      - name: Upload API test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-allure-results
+          path: reports/allure-results
+          retention-days: 14
 
-document_library:
-  size: 9 documents
-  trap_documents:
-    D-003: In Review APAC travel doc (should be excluded from answers)
-    D-005: Retired remote-work doc, next to its live replacement D-004
-    D-009: Draft, EMEA-only, Manager-only vendor checklist
+  ui-tests:
+    name: UI Test Suite
+    runs-on: ubuntu-latest
+    needs: api-tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+
+      - name: Create .env file
+        run: |
+          echo "BASE_URL=${{ secrets.BASE_URL }}" >> .env
+          echo "HEADLESS=true" >> .env
+
+      - name: Run UI tests
+        run: pytest tests/ui -n auto --alluredir=reports/allure-results
+
+      - name: Upload UI test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-allure-results
+          path: reports/allure-results
+          retention-days: 14
+
+  publish-report:
+    name: Publish Allure Report
+    runs-on: ubuntu-latest
+    needs: [api-tests, ui-tests]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download API results
+        uses: actions/download-artifact@v4
+        with:
+          name: api-allure-results
+          path: reports/allure-results
+
+      - name: Download UI results
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-allure-results
+          path: reports/allure-results
+
+      - name: Generate Allure report
+        uses: simple-elf/allure-report-action@v1.9
+        if: always()
+        with:
+          allure_results: reports/allure-results
+          allure_report: reports/allure-report
+
+      - name: Upload Allure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: reports/allure-report
+          retention-days: 14
